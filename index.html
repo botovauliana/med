@@ -382,6 +382,10 @@ article a{color:var(--accent-ink)}
 .banner.show{display:flex}
 .banner .grow{flex:1}
 
+/* подпись автора у общего комментария */
+.bub .bw{ font-size:12px; color:var(--muted); margin:-2px 0 6px; }
+.ci .cw{ color:var(--muted); font-style:normal; font-size:12px; }
+
 </style>
 </head>
 <body>
@@ -559,6 +563,7 @@ article a{color:var(--accent-ink)}
 
 <div class="bub" id="bub">
   <div class="bt">Комментарий</div>
+  <div class="bw" id="bubWho" style="display:none"></div>
   <textarea id="bubTa" placeholder="Что важно помнить об этом фрагменте…"></textarea>
   <div class="row">
     <button class="btn sm" id="bubDel"><svg class="ic sm"><use href="#i-trash"/></svg>Удалить</button>
@@ -606,7 +611,7 @@ article a{color:var(--accent-ink)}
 <div class="ov" id="teamOv">
   <div class="modal wide">
     <h3>Команда</h3>
-    <p>Конспекты общие: все участники видят один и тот же текст. Выделения, комментарии, заметки и прогресс у каждого свои и никому больше не видны.</p>
+    <p>Общие на всю команду: текст конспектов, комментарии в тексте и заметки по теме. Личные и никому не видные: выделения маркером, крупный текст, результаты тестов и карточек.</p>
     <div id="teamList" class="people"></div>
     <div id="inviteBox">
       <label class="field"><span>Пригласить по почте</span><input id="invEmail" type="email" placeholder="коллега@example.com"></label>
@@ -1169,7 +1174,7 @@ window.Store = (function(){
     if(!v){ v=Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem(CACHE+"client",v);} return v; })();
 
   let sb=null, user=null, cfg=null;
-  let topics=[], state={}, members=[], me=null, queue={}, flushT=null, status="idle", statusMsg="";
+  let topics=[], state={}, shared={}, members=[], me=null, queue={}, flushT=null, status="idle", statusMsg="";
   const listeners={status:[],remote:[],auth:[],members:[]};
 
   function on(ev,fn){ (listeners[ev]||[]).push(fn); }
@@ -1227,23 +1232,25 @@ window.Store = (function(){
     const {error}=await sb.auth.signUp({email:email,password:password,options:{emailRedirectTo:location.origin+location.pathname}});
     if(error) throw error; return true;
   }
-  async function signOut(){ try{ await sb.auth.signOut(); }catch(e){} user=null; topics=[]; state={}; emit("auth",null); }
+  async function signOut(){ try{ await sb.auth.signOut(); }catch(e){} user=null; topics=[]; state={}; shared={}; emit("auth",null); }
 
   /* ---------- загрузка данных ---------- */
   async function loadAll(){
     if(!user) return {topics:[],state:{}};
     setStatus("loading");
     // кэш показываем сразу, чтобы не ждать сеть
-    const ct=cGet("topics:"+user.id), cs=cGet("state:"+user.id);
-    if(ct) topics=ct; if(cs) state=cs;
+    const ct=cGet("topics:"+user.id), cs=cGet("state:"+user.id), ch=cGet("shared");
+    if(ct) topics=ct; if(cs) state=cs; if(ch) shared=ch;
     try{
       const t=await sb.from("topics").select("*").order("position",{ascending:true});
       if(t.error) throw t.error;
       const s=await sb.from("user_state").select("key,value");
       if(s.error) throw s.error;
+      const sh=await sb.from("shared_state").select("key,value,updated_by,updated_at");
       const m=await sb.from("members").select("user_id,email,role");
       topics=t.data||[];
       state={}; (s.data||[]).forEach(r=>{ state[r.key]=r.value; });
+      if(!sh.error){ shared={}; (sh.data||[]).forEach(r=>{ shared[r.key]=r.value; }); cSet("shared",shared); }
       members=m.error?[]:(m.data||[]);
       me=members.find(x=>x.user_id===user.id)||null;
       cSet("topics:"+user.id,topics); cSet("state:"+user.id,state);
@@ -1270,6 +1277,28 @@ window.Store = (function(){
     scheduleFlush();
   }
   function allState(){ return state; }
+
+  /* ---------- общий слой команды (комментарии и заметки) ---------- */
+  function sget(key){ return shared[key]!==undefined?shared[key]:null; }
+  function sset(key,val){
+    shared[key]=val; cSet("shared",shared);
+    queue["shared:"+key]={kind:"shared",key:key,value:val};
+    scheduleFlush();
+  }
+  function sdel(key){
+    delete shared[key]; cSet("shared",shared);
+    queue["shared:"+key]={kind:"shared-del",key:key};
+    scheduleFlush();
+  }
+  function allShared(){ return shared; }
+  // подпись под комментарием: почта автора, а для себя — «я»
+  function whoIs(uid){
+    if(!uid) return "";
+    if(user && uid===user.id) return "я";
+    const m=members.find(x=>x.user_id===uid);
+    return m?m.email:"коллега";
+  }
+  function myId(){ return user?user.id:null; }
 
   /* ---------- темы ---------- */
   function saveTopic(slug,patch){
@@ -1308,7 +1337,12 @@ window.Store = (function(){
         owner:user.id, key:pending[k].key, value:pending[k].value,
         updated_at:new Date().toISOString(), client_id:CLIENT_ID }));
       if(states.length){ const {error}=await sb.from("user_state").upsert(states,{onConflict:"owner,key"}); if(error) throw error; }
+      const shares=keys.filter(k=>pending[k].kind==="shared").map(k=>({
+        key:pending[k].key, value:pending[k].value,
+        updated_at:new Date().toISOString(), updated_by:user.id, client_id:CLIENT_ID }));
+      if(shares.length){ const {error}=await sb.from("shared_state").upsert(shares,{onConflict:"key"}); if(error) throw error; }
       for(const k of keys){ const it=pending[k];
+        if(it.kind==="shared-del"){ const {error}=await sb.from("shared_state").delete().eq("key",it.key); if(error) throw error; }
         if(it.kind==="state-del"){ const {error}=await sb.from("user_state").delete().eq("owner",user.id).eq("key",it.key); if(error) throw error; }
         if(it.kind==="topic"){ const p=Object.assign({},it.patch,{updated_at:new Date().toISOString(),client_id:CLIENT_ID,updated_by:user.id});
           const {error}=await sb.from("topics").update(p).eq("slug",it.slug); if(error) throw error; }
@@ -1332,6 +1366,12 @@ window.Store = (function(){
         if(row.client_id===CLIENT_ID) return;
         if(p.eventType==="DELETE") delete state[row.key]; else state[row.key]=row.value;
         cSet("state:"+user.id,state); emit("remote",{kind:"state",key:row.key});
+      })
+      .on("postgres_changes",{event:"*",schema:"public",table:"shared_state"},p=>{
+        const row=p.new||p.old; if(!row) return;
+        if(row.client_id===CLIENT_ID) return;
+        if(p.eventType==="DELETE") delete shared[row.key]; else shared[row.key]=row.value;
+        cSet("shared",shared); emit("remote",{kind:"shared",key:row.key});
       })
       .on("postgres_changes",{event:"*",schema:"public",table:"topics"},p=>{
         const row=p.new; if(!row||row.client_id===CLIENT_ID) return;
@@ -1369,11 +1409,11 @@ window.Store = (function(){
 
   /* ---------- экспорт и импорт ---------- */
   function exportAll(){
-    return { app:"inf-notes", version:4, exportedAt:new Date().toISOString(),
+    return { app:"inf-notes", version:5, exportedAt:new Date().toISOString(),
       topics:topics.map(t=>({slug:t.slug,title:t.title,section:t.section,lesson:t.lesson,color:t.color,
         agent:t.agent,lead:t.lead,facts:t.facts,cheat:t.cheat,content_html:t.content_html,
         test:t.test,cards:t.cards,position:t.position})),
-      state:state };
+      state:state, shared:shared };
   }
   async function importAll(obj,mode){
     if(!user) throw new Error("нет входа");
@@ -1384,6 +1424,13 @@ window.Store = (function(){
       const rows=obj.topics.map((t,i)=>Object.assign({},t,{position:t.position!=null?t.position:i,client_id:CLIENT_ID,updated_by:user.id}));
       const {error}=await sb.from("topics").upsert(rows,{onConflict:"slug"});
       if(error) throw error;
+    }
+    if(obj.shared){
+      const rows=Object.keys(obj.shared).map(k=>({key:k,value:obj.shared[k],client_id:CLIENT_ID,updated_by:user.id,updated_at:new Date().toISOString()}));
+      for(let i=0;i<rows.length;i+=200){
+        const {error}=await sb.from("shared_state").upsert(rows.slice(i,i+200),{onConflict:"key"});
+        if(error) throw error;
+      }
     }
     if(obj.state){
       if(mode==="replace"){ const {error}=await sb.from("user_state").delete().eq("owner",user.id); if(error) throw error; }
@@ -1417,7 +1464,8 @@ window.Store = (function(){
 
   return { init, ready, currentUser, getMembers, myRole, canEdit, listInvites, invite, revokeInvite, setRole, removeMember, signIn, signInPassword, signUpPassword, signOut,
     loadAll, refresh, getTopics, getTopic, seedTopics, saveTopic,
-    get, set, del, allState, on, status:()=>({status:status,msg:statusMsg}), retry, pendingCount,
+    get, set, del, allState,
+    sget, sset, sdel, allShared, whoIs, myId, on, status:()=>({status:status,msg:statusMsg}), retry, pendingCount,
     uploadImage, exportAll, importAll, saveLocalConfig, hasConfig:()=>!!cfg };
 })();
 
@@ -1679,8 +1727,42 @@ let blocks=[], anns=[], lostAnns=[], curCmt=null;
 const article=$("#article"), pop=$("#pop"), bub=$("#bub");
 
 /* ---------- аннотации ---------- */
-function getAnn(id){ const a=lsGet("ann:"+id); return (a&&Array.isArray(a.items))?a.items:[]; }
-function saveAnn(){ if(!current) return; save("ann:"+current,{v:hash(srcText(current)),items:anns}); }
+function clean(a){ const o=Object.assign({},a); delete o._i; return o; }
+// личные пометки (маркер, крупный текст) и общие комментарии хранятся раздельно
+function getAnn(id){
+  const a=lsGet("ann:"+id);
+  const all=(a&&Array.isArray(a.items))?a.items:[];
+  const mine=all.filter(x=>x.t!=="cmt");
+  const old=all.filter(x=>x.t==="cmt");
+  const c=S.sget("com:"+id);
+  let com=(c&&Array.isArray(c.items))?c.items:[];
+  if(old.length){            // одноразовый перенос прежних комментариев в общий слой
+    const key=x=>x.b+"|"+x.s+"|"+x.e+"|"+(x.n||"");
+    const have=new Set(com.map(key));
+    old.forEach(x=>{ if(!have.has(key(x))){ com=com.concat([clean(x)]); have.add(key(x)); } });
+    const v=hash(srcText(id));
+    S.sset("com:"+id,{v:v,items:com});
+    save("ann:"+id,{v:v,items:mine.map(clean)});
+  }
+  // копии: разметка дописывает служебные поля, они не должны попасть в базу
+  return mine.concat(com).map(x=>Object.assign({},x));
+}
+function saveAnn(){
+  if(!current) return;
+  const v=hash(srcText(current));
+  save("ann:"+current,{v:v,items:anns.filter(a=>a.t!=="cmt").map(clean)});
+  S.sset("com:"+current,{v:v,items:anns.filter(a=>a.t==="cmt").map(clean)});
+}
+function whenShort(iso){
+  if(!iso) return "";
+  const d=new Date(iso); if(isNaN(d)) return "";
+  const day=864e5, now=new Date();
+  const same=d.toDateString()===now.toDateString();
+  const hm=d.toTimeString().slice(0,5);
+  if(same) return "сегодня в "+hm;
+  if(now-d<2*day) return "вчера в "+hm;
+  return d.toLocaleDateString("ru-RU",{day:"numeric",month:"short"});
+}
 function mkEl(a){
   if(a.t==="big"){ const s=document.createElement("span"); s.className="big"; return s; }
   if(a.t==="cmt"){ const s=document.createElement("span"); s.className="cmt"; s.dataset.note=a.n||""; s.title=a.n||""; s.dataset.ai=a._i; return s; }
@@ -1771,6 +1853,12 @@ pop.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
 /* ---------- комментарии ---------- */
 function openBubble(span){
   curCmt=span; $("#bubTa").value=span.dataset.note||"";
+  const a=anns[+span.dataset.ai]||{}, who=$("#bubWho");
+  if(who){
+    const name=a.u?S.whoIs(a.u):"", when=whenShort(a.at);
+    who.textContent=name?(name==="я"?("мой комментарий"+(when?", "+when:"")):(name+(when?", "+when:""))):"";
+    who.style.display=who.textContent?"":"none";
+  }
   bub.classList.add("show");
   const r=span.getBoundingClientRect(), bw=bub.offsetWidth;
   let x=Math.max(8+scrollX,Math.min(r.left+scrollX,scrollX+document.documentElement.clientWidth-bw-8));
@@ -1782,7 +1870,8 @@ function openBubble(span){
 function hideBub(){ bub.classList.remove("show"); curCmt=null; }
 $("#bubSave").onclick=()=>{
   if(!curCmt) return; const v=$("#bubTa").value.trim(); const i=+curCmt.dataset.ai;
-  if(!v) anns.splice(i,1); else anns[i].n=v;
+  if(!v) anns.splice(i,1);
+  else { anns[i].n=v; anns[i].u=S.myId(); anns[i].at=new Date().toISOString(); }
   hideBub(); saveAnn(); renderTopic();
 };
 $("#bubDel").onclick=()=>{ if(!curCmt) return; anns.splice(+curCmt.dataset.ai,1); hideBub(); saveAnn(); renderTopic(); };
@@ -1798,7 +1887,7 @@ function toggleNotes(){
   if(notesOpen){ refreshCmtList(); $("#noteEd").focus(); }
 }
 let nT=null;
-$("#noteEd").addEventListener("input",()=>{ clearTimeout(nT); setStatus("saving"); nT=setTimeout(()=>{ if(current) save("note:"+current,$("#noteEd").innerHTML); },700); });
+$("#noteEd").addEventListener("input",()=>{ clearTimeout(nT); setStatus("saving"); nT=setTimeout(()=>{ if(current) S.sset("note:"+current,$("#noteEd").innerHTML); },700); });
 function refreshCmtList(){
   const box=$("#cmtList"); const items=[...article.querySelectorAll(".cmt")].filter(c=>(c.dataset.note||"").trim());
   box.innerHTML=""; box.classList.toggle("show",items.length>0);
@@ -1808,6 +1897,9 @@ function refreshCmtList(){
   items.forEach(c=>{ const d=document.createElement("div"); d.className="ci";
     const b=document.createElement("b"); b.textContent=c.textContent.slice(0,46)+(c.textContent.length>46?"…":"");
     d.append(b,document.createTextNode(" — "+c.dataset.note));
+    const a=anns[+c.dataset.ai]||{};
+    if(a.u){ const w=document.createElement("i"); w.className="cw";
+      w.textContent=" · "+S.whoIs(a.u)+(a.at?", "+whenShort(a.at):""); d.appendChild(w); }
     d.onclick=()=>{ c.scrollIntoView({behavior:"smooth",block:"center"}); setTimeout(()=>openBubble(c),420); };
     box.appendChild(d); });
 }
@@ -1887,7 +1979,9 @@ async function openTopic(id){
   const t=T(id);
   document.documentElement.style.setProperty("--accent",t.color);
   renderHero(t); renderCheat(t); renderTopic();
-  $("#noteEd").innerHTML = lsGet("note:"+id)||"";
+  const shN=S.sget("note:"+id), myN=lsGet("note:"+id);
+  if((shN==null||shN==="") && myN){ S.sset("note:"+id,myN); lsDel("note:"+id); }   // перенос прежних заметок в общие
+  $("#noteEd").innerHTML = (shN!=null&&shN!=="")?shN:(myN||"");
   renderTopicList();
   setStatus("saved"); hideBub();
 }
@@ -2314,8 +2408,8 @@ $$("#sheet [data-sh]").forEach(b=>b.onclick=()=>{
 });
 function resetTopic(){
   if(!current) return;
-  confirmDlg("Убрать мои выделения в этой теме?","Выделения и комментарии этой темы удалятся. Текст конспекта и заметки останутся.",()=>{
-    anns=[]; save("ann:"+current,{v:"",items:[]}); renderTopic();
+  confirmDlg("Убрать мои выделения в этой теме?","Маркеры и крупный текст в этой теме удалятся — только твои. Общие комментарии, заметки и текст конспекта останутся.",()=>{
+    anns=anns.filter(a=>a.t==="cmt"); saveAnn(); renderTopic();
   });
 }
 function restoreSeed(){
@@ -2381,6 +2475,17 @@ window.bootApp=bootApp;
 window.rebuildTopics=rebuildTopics;
 window.renderHomeSafe=()=>{ try{ renderHome(); }catch(e){} };
 window.reRoute=()=>{ try{ route(); }catch(e){} };
+// коллега изменил общий комментарий или заметку — подхватываем, не мешая набору
+window.applySharedChange=function(key){
+  try{
+    if(!current) return;
+    if(key==="com:"+current){ renderTopic(); return; }
+    if(key==="note:"+current){
+      const ed=$("#noteEd");
+      if(document.activeElement!==ed) ed.innerHTML=S.sget("note:"+current)||"";
+    }
+  }catch(e){}
+};
 applyTheme(theme);
 
 </script>
@@ -2560,6 +2665,7 @@ applyTheme(theme);
           } else { window.reRoute(); }
         }
       }
+      if(info.kind==="shared" && window.applySharedChange) window.applySharedChange(info.key);
       window.renderHomeSafe();
     });
     $("#remoteApply").onclick=()=>{ banner.classList.remove("show"); if(!Editor.isActive()) window.reRoute(); };
