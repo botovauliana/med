@@ -1,0 +1,10 @@
+{
+  "name": "infectious-diseases-notes",
+  "version": "4.0.0",
+  "private": true,
+  "description": "Сайт-конспект по инфекционным болезням: конспекты, тесты, карточки, совместная работа",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev"
+  }
+}
