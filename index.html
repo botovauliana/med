@@ -433,12 +433,32 @@ table.grid .dot{display:inline-block;width:8px;height:8px;border-radius:50%;marg
 .wrap.wide{max-width:none}
 .wrap.wide .grid-wrap{max-height:calc(100vh - 230px)}
 
+/* ---------- картинки ---------- */
+.shots{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0}
+.shots .sh{position:relative;width:62px;height:62px;border-radius:8px;overflow:hidden;border:1px solid var(--line2);background:var(--panel2)}
+.shots .sh img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
+.shots .sh button{position:absolute;top:2px;right:2px;width:18px;height:18px;line-height:1;padding:0;border-radius:50%;
+  border:none;background:rgba(0,0,0,.62);color:#fff;font-size:12px;cursor:pointer}
+.shots.up{opacity:.55}
+.notes .nh{display:flex;align-items:center;gap:10px}
+.notes .nh .btn{margin-left:auto;font-weight:400}
+.ci .shots{margin-top:6px}
+.ci .shots .sh{width:46px;height:46px}
+article img,.ed img{max-width:100%;height:auto;border-radius:10px;cursor:zoom-in}
+article figure{margin:18px 0}
+article figcaption{font-size:13.5px;color:var(--muted);margin-top:6px}
+.ed.drag,article.drag{outline:2px dashed var(--accent);outline-offset:4px}
+.imgov{padding:24px;align-items:center}
+.imgov img{max-width:100%;max-height:92vh;border-radius:10px;display:block;margin:auto}
+.imgov #imgClose{position:fixed;top:16px;right:16px;background:var(--panel)}
+
 </style>
 </head>
 <body>
 <svg class="sr" aria-hidden="true"><defs>
 <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M4 17h15"/></symbol>
 <symbol id="i-quiz" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.6.2-1 .8-1 1.4v.3"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-img" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-6 6-3-3-4 4"/></symbol>
 <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-cards" viewBox="0 0 24 24"><rect x="3" y="7" width="13" height="13" rx="2"/><path d="M8 4h10a2 2 0 0 1 2 2v10"/></symbol>
@@ -582,7 +602,10 @@ table.grid .dot{display:inline-block;width:8px;height:8px;border-radius:50%;marg
       <details class="cheat" id="cheat"></details>
       <div class="lost" id="lost" style="display:none"></div>
       <section class="notes" id="notes">
-        <div class="nh">Мои заметки по теме</div>
+        <div class="nh">Общие заметки по теме
+          <button class="btn sm" id="noteImg" title="Вставить картинку"><svg class="ic sm"><use href="#i-img"/></svg>Картинка</button>
+          <input type="file" id="noteFile" accept="image/*" multiple style="display:none">
+        </div>
         <div class="ed" id="noteEd" contenteditable="true"></div>
         <div class="cmt-list" id="cmtList"></div>
       </section>
@@ -617,7 +640,10 @@ table.grid .dot{display:inline-block;width:8px;height:8px;border-radius:50%;marg
   <div class="bt">Комментарий</div>
   <div class="bw" id="bubWho" style="display:none"></div>
   <textarea id="bubTa" placeholder="Что важно помнить об этом фрагменте…"></textarea>
+  <div class="shots" id="bubShots"></div>
+  <input type="file" id="bubFile" accept="image/*" multiple style="display:none">
   <div class="row">
+    <button class="btn sm" id="bubImg" title="Добавить картинку"><svg class="ic sm"><use href="#i-img"/></svg>Картинка</button>
     <button class="btn sm" id="bubDel"><svg class="ic sm"><use href="#i-trash"/></svg>Удалить</button>
     <button class="btn sm on" id="bubSave"><svg class="ic sm"><use href="#i-check"/></svg>Сохранить</button>
   </div>
@@ -652,6 +678,7 @@ table.grid .dot{display:inline-block;width:8px;height:8px;border-radius:50%;marg
   </div>
 </div>
 
+<div class="ov imgov" id="imgOv"><img id="imgBig" alt=""><button class="btn icon" id="imgClose" title="Закрыть"><svg class="ic"><use href="#i-x"/></svg></button></div>
 <button class="btn icon backtop" id="backtop" title="Наверх"><svg class="ic"><use href="#i-up"/></svg></button>
 
 
@@ -1915,6 +1942,9 @@ function openBubble(span){
     who.textContent=name?(name==="я"?("мой комментарий"+(when?", "+when:"")):(name+(when?", "+when:""))):"";
     who.style.display=who.textContent?"":"none";
   }
+  curImgs=Array.isArray(a.im)?a.im.slice():[];
+  drawShots();
+  $("#bubImg").style.display=S.canEdit()?"":"none";
   bub.classList.add("show");
   const r=span.getBoundingClientRect(), bw=bub.offsetWidth;
   let x=Math.max(8+scrollX,Math.min(r.left+scrollX,scrollX+document.documentElement.clientWidth-bw-8));
@@ -1923,11 +1953,34 @@ function openBubble(span){
   bub.style.left=x+"px"; bub.style.top=y+"px";
   setTimeout(()=>$("#bubTa").focus(),30);
 }
-function hideBub(){ bub.classList.remove("show"); curCmt=null; }
+function hideBub(){ bub.classList.remove("show"); curCmt=null; curImgs=[]; }
+(function(){
+  const btn=document.getElementById("bubImg"), inp=document.getElementById("bubFile");
+  if(!btn||!inp) return;
+  btn.onclick=()=>inp.click();
+  inp.onchange=async()=>{ const f=[...inp.files]; inp.value="";
+    $("#bubShots").classList.add("up");
+    const urls=await putImages(f);
+    $("#bubShots").classList.remove("up");
+    curImgs=curImgs.concat(urls); drawShots(); };
+  // вставка из буфера прямо в поле комментария
+  document.getElementById("bubTa").addEventListener("paste",async e=>{
+    const items=e.clipboardData&&e.clipboardData.files;
+    if(!items||!items.length||!S.canEdit()) return;
+    const imgs=[...items].filter(f=>/^image\//.test(f.type));
+    if(!imgs.length) return;
+    e.preventDefault();
+    $("#bubShots").classList.add("up");
+    const urls=await putImages(imgs);
+    $("#bubShots").classList.remove("up");
+    curImgs=curImgs.concat(urls); drawShots();
+  });
+})();
 $("#bubSave").onclick=()=>{
   if(!curCmt) return; const v=$("#bubTa").value.trim(); const i=+curCmt.dataset.ai;
-  if(!v) anns.splice(i,1);
-  else { anns[i].n=v; anns[i].u=S.myId(); anns[i].at=new Date().toISOString(); }
+  if(!v && !curImgs.length) anns.splice(i,1);
+  else { anns[i].n=v; if(curImgs.length) anns[i].im=curImgs.slice(); else delete anns[i].im;
+         anns[i].u=S.myId(); anns[i].at=new Date().toISOString(); }
   hideBub(); saveAnn(); renderTopic();
 };
 $("#bubDel").onclick=()=>{ if(!curCmt) return; anns.splice(+curCmt.dataset.ai,1); hideBub(); saveAnn(); renderTopic(); };
@@ -1940,9 +1993,39 @@ function toggleNotes(){
   notesOpen=!notesOpen;
   $("#notes").classList.toggle("show",notesOpen);
   $("#notesBtn").classList.toggle("on",notesOpen);
-  if(notesOpen){ refreshCmtList(); $("#noteEd").focus(); }
+  if(notesOpen){ refreshCmtList(); const nb=$("#noteImg"); if(nb) nb.style.display=S.canEdit()?"":"none"; $("#noteEd").focus(); }
 }
 let nT=null;
+(function(){
+  const ed=document.getElementById("noteEd"), btn=document.getElementById("noteImg"), inp=document.getElementById("noteFile");
+  if(!ed) return;
+  const insert=url=>{
+    ed.focus();
+    const sel=getSelection();
+    if(!sel.rangeCount || !ed.contains(sel.anchorNode)){
+      const r=document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+    document.execCommand("insertHTML",false,'<p><img src="'+url+'" alt=""></p><p><br></p>');
+    ed.dispatchEvent(new Event("input",{bubbles:true}));
+  };
+  if(btn&&inp){
+    btn.onclick=()=>inp.click();
+    inp.onchange=async()=>{ const f=[...inp.files]; inp.value="";
+      const urls=await putImages(f); urls.forEach(insert); };
+  }
+  ed.addEventListener("paste",async e=>{
+    const files=e.clipboardData&&e.clipboardData.files;
+    if(files&&files.length&&[...files].some(f=>/^image\//.test(f.type))){
+      e.preventDefault();
+      const urls=await putImages(files); urls.forEach(insert); return;
+    }
+    // обычный текст вставляем без чужого оформления
+    const t=e.clipboardData&&e.clipboardData.getData("text/plain");
+    if(t!=null){ e.preventDefault(); document.execCommand("insertText",false,t); }
+  });
+  dropZone(ed,insert);
+})();
 $("#noteEd").addEventListener("input",()=>{ clearTimeout(nT); setStatus("saving"); nT=setTimeout(()=>{ if(current) S.sset("note:"+current,$("#noteEd").innerHTML); },700); });
 function refreshCmtList(){
   const box=$("#cmtList"); const items=[...article.querySelectorAll(".cmt")].filter(c=>(c.dataset.note||"").trim());
@@ -1956,6 +2039,14 @@ function refreshCmtList(){
     const a=anns[+c.dataset.ai]||{};
     if(a.u){ const w=document.createElement("i"); w.className="cw";
       w.textContent=" · "+S.whoIs(a.u)+(a.at?", "+whenShort(a.at):""); d.appendChild(w); }
+    if(Array.isArray(a.im)&&a.im.length){
+      const sh=document.createElement("div"); sh.className="shots";
+      a.im.forEach(u=>{ const w=document.createElement("div"); w.className="sh";
+        const im=document.createElement("img"); im.src=u; im.alt="";
+        im.onclick=e=>{ e.stopPropagation(); bigImage(u); };
+        w.appendChild(im); sh.appendChild(w); });
+      d.appendChild(sh);
+    }
     d.onclick=()=>{ c.scrollIntoView({behavior:"smooth",block:"center"}); setTimeout(()=>openBubble(c),420); };
     box.appendChild(d); });
 }
@@ -1971,6 +2062,11 @@ $("#editBtn").onclick=()=>{
       const p=el.parentNode; while(el.firstChild) p.insertBefore(el.firstChild,el); p.removeChild(el); });
     $("#editBtn").classList.add("on");
     Editor.start(article,html=>{ clearTimeout(edT); edT=setTimeout(()=>{ S.saveTopic(current,{content_html:html}); },1000); });
+    dropZone(article,url=>{
+      article.focus();
+      document.execCommand("insertHTML",false,'<figure><img src="'+url+'" alt=""><figcaption>Подпись к картинке</figcaption></figure><p><br></p>');
+      article.dispatchEvent(new Event("input",{bubbles:true}));
+    });
   } else {
     const html=Editor.stop();
     editing=false; $("#editBtn").classList.remove("on");
@@ -2077,6 +2173,75 @@ function setMode(m){
   scrollTo(0,0);
 }
 $$(".mode").forEach(b=>b.onclick=()=>{ location.hash=(weakMode?"weak":current)+"/"+b.dataset.m; });
+
+/* ============================ КАРТИНКИ ============================ */
+let curImgs=[];
+
+// загрузка одного или нескольких файлов; возвращает список адресов
+async function putImages(files){
+  const list=[...files].filter(f=>f && /^image\//.test(f.type));
+  if(!list.length) return [];
+  const out=[];
+  setStatus("saving");
+  for(const f of list){
+    try{ out.push(await S.uploadImage(f)); }
+    catch(e){ setStatus({status:"error",msg:"картинка не загрузилась: "+(e&&e.message||e)}); return out; }
+  }
+  setStatus("saved");
+  return out;
+}
+
+// миниатюры под комментарием
+function drawShots(){
+  const box=$("#bubShots"); if(!box) return;
+  box.innerHTML="";
+  curImgs.forEach((u,i)=>{
+    const d=document.createElement("div"); d.className="sh";
+    const im=document.createElement("img"); im.src=u; im.alt="";
+    im.onclick=()=>bigImage(u);
+    const x=document.createElement("button"); x.type="button"; x.textContent="×"; x.title="Убрать";
+    x.onclick=e=>{ e.stopPropagation(); curImgs.splice(i,1); drawShots(); };
+    d.append(im,x); box.appendChild(d);
+  });
+}
+
+// просмотр во весь экран
+function bigImage(url){
+  const ov=$("#imgOv"); if(!ov) return;
+  $("#imgBig").src=url; ov.classList.add("show");
+}
+(function(){
+  const ov=document.getElementById("imgOv"); if(!ov) return;
+  const close=()=>{ ov.classList.remove("show"); $("#imgBig").removeAttribute("src"); };
+  ov.addEventListener("mousedown",e=>{ if(e.target.id==="imgOv"||e.target.id==="imgClose") close(); });
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&ov.classList.contains("show")) close(); });
+})();
+
+// клик по картинке в тексте или заметках — открыть крупно (не мешая правке)
+document.addEventListener("click",e=>{
+  const im=e.target;
+  if(!im||im.tagName!=="IMG") return;
+  if(im.closest("#imgOv")||im.closest(".shots")) return;
+  if(im.closest("#article")||im.closest("#noteEd")){
+    if(im.closest('[contenteditable="true"]') && Editor.isActive && Editor.isActive()) return;
+    bigImage(im.currentSrc||im.src);
+  }
+});
+
+// перетаскивание файла в заметки или в текст конспекта
+function dropZone(el,insert){
+  if(!el||el.dataset.dz) return; el.dataset.dz="1";
+  const on=e=>{ if(e.dataTransfer&&[...e.dataTransfer.types].includes("Files")){ e.preventDefault(); el.classList.add("drag"); } };
+  el.addEventListener("dragover",on);
+  el.addEventListener("dragenter",on);
+  el.addEventListener("dragleave",()=>el.classList.remove("drag"));
+  el.addEventListener("drop",async e=>{
+    if(!e.dataTransfer||!e.dataTransfer.files||!e.dataTransfer.files.length) return;
+    e.preventDefault(); el.classList.remove("drag");
+    const urls=await putImages(e.dataTransfer.files);
+    urls.forEach(insert);
+  });
+}
 
 /* ============================ ТАБЛИЦА ============================ */
 const TBL_DEF=[
