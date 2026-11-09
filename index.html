@@ -8,7 +8,10 @@
 <title>Инфекционные болезни — конспекты</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- шрифты грузятся в фоне: пока их нет, текст рисуется системным, страница не ждёт Google -->
+<link rel="stylesheet" media="print" onload="this.media='all';this.onload=null"
+      href="https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400&family=Golos+Text:wght@400;500;600;700&display=swap">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400&family=Golos+Text:wght@400;500;600;700&display=swap"></noscript>
 <style>
 :root{
   --bg:#0f1115; --panel:#171a20; --panel2:#1d2129; --ink:#e8e6e1; --dim:#b9b5ac; --muted:#8c8882;
@@ -2933,8 +2936,26 @@ applyTheme(theme);
 (function(){
   const $=s=>document.querySelector(s);
   const SCREENS=["setup","gate","noaccess","shell"];
-  function show(id){ SCREENS.forEach(x=>{ const e=$("#"+x); if(!e) return;
-    e.style.display = (x===id) ? (x==="shell"?"block":"flex") : "none"; }); }
+  let stuckT=null;
+  function show(id){ clearTimeout(stuckT); const st=document.getElementById("stuck"); if(st) st.remove();
+    SCREENS.forEach(x=>{ const e=$("#"+x); if(!e) return;
+      e.style.display = (x===id) ? (x==="shell"?"block":"flex") : "none"; }); }
+  // если запуск где-то повис, человек должен увидеть объяснение, а не пустую страницу
+  function watchBoot(){
+    clearTimeout(stuckT);
+    stuckT=setTimeout(()=>{
+      if(document.getElementById("stuck")) return;
+      const d=document.createElement("div"); d.id="stuck"; d.className="gate"; d.style.display="flex";
+      d.innerHTML="<div class='gate-box'><h1>Что-то долго грузится</h1>"+
+        "<p>Сайт не может достучаться до базы. Обычно это слабая сеть или блокировщик, "+
+        "который режет обращения к supabase.co.</p>"+
+        "<p>Попробуй: другую сеть (например, мобильный интернет вместо Wi-Fi), "+
+        "отключить блокировщик рекламы для этого сайта или открыть сайт позже.</p>"+
+        "<button class='btn on' id='stuckAgain'>Попробовать снова</button></div>";
+      document.body.appendChild(d);
+      const b=document.getElementById("stuckAgain"); if(b) b.onclick=()=>location.reload();
+    },9000);
+  }
   function msg(el,text,kind){ const m=$(el); if(!m) return;
     m.textContent=text; m.className="msg show "+(kind||""); if(!text) m.className="msg"; }
 
@@ -3112,7 +3133,13 @@ applyTheme(theme);
   /* ---------------- запуск ---------------- */
   async function afterLogin(){
     const u=Store.currentUser(); if(!u) return gateScreen();
-    await Store.loadAll();
+    watchBoot();
+    try{ await Store.loadAll(); }
+    catch(e){ clearTimeout(stuckT);
+      document.body.insertAdjacentHTML("beforeend",
+        "<div class='gate' id='stuck' style='display:flex'><div class='gate-box'><h1>Не удалось загрузить данные</h1>"+
+        "<p>"+human(e)+"</p><button class='btn on' onclick='location.reload()'>Попробовать снова</button></div></div>");
+      return; }
     const me=(Store.getMembers()||[]).find(m=>m.user_id===u.id);
     if(!me){ $("#naEmail").textContent=u.email||""; show("noaccess"); return; }
     window.rebuildTopics();
@@ -3130,6 +3157,7 @@ applyTheme(theme);
     window.bootApp();
   }
   async function start(){
+    watchBoot();
     Store.on("status",s=>{ if(window.setStatus) window.setStatus(s); });
     Store.on("auth",u=>{ if(u) afterLogin(); else gateScreen(); });
     const r=await Store.init();
